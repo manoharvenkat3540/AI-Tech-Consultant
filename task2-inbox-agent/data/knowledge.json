@@ -1,0 +1,68 @@
+[
+  {
+    "id": "billing-001",
+    "category": "billing",
+    "title": "Payment and Invoice Policy",
+    "content": "Customers who complete a payment but do not receive an invoice should contact the billing support team. The support team must verify the transaction and confirm the payment status before providing an update. Never claim that a payment succeeded without verification.",
+    "keywords": [
+      "payment",
+      "invoice",
+      "billing",
+      "transaction",
+      "payment status",
+      "missing invoice"
+    ]
+  },
+  {
+    "id": "billing-002",
+    "category": "billing",
+    "title": "Refund Request Policy",
+    "content": "Refund requests must be reviewed by the billing support team. The team should verify the transaction and applicable refund conditions before confirming eligibility or processing a refund. Do not promise a refund before verification.",
+    "keywords": [
+      "refund",
+      "money back",
+      "billing",
+      "refund status",
+      "payment reversal"
+    ]
+  },
+  {
+    "id": "account-001",
+    "category": "account_access",
+    "title": "Account Login Support",
+    "content": "Customers who cannot access their accounts should use the password reset process. Support staff can help troubleshoot login problems. Never ask customers to share passwords or authentication codes.",
+    "keywords": [
+      "password",
+      "login",
+      "sign in",
+      "account access",
+      "reset password"
+    ]
+  },
+  {
+    "id": "domain-001",
+    "category": "domain_support",
+    "title": "Domain and DNS Troubleshooting",
+    "content": "If a website is not opening, support should check the domain configuration, DNS records, and domain status. The support team should verify the configuration before confirming the cause of the problem.",
+    "keywords": [
+      "domain",
+      "dns",
+      "website not opening",
+      "domain configuration",
+      "dns records"
+    ]
+  },
+  {
+    "id": "general-001",
+    "category": "general_support",
+    "title": "General Customer Support",
+    "content": "Customer support should acknowledge the customer's concern, gather the information needed to investigate the issue, and provide a clear next step. Do not claim that an issue has been resolved unless resolution has been verified.",
+    "keywords": [
+      "support",
+      "help",
+      "issue",
+      "assistance",
+      "customer service"
+    ]
+  }
+]

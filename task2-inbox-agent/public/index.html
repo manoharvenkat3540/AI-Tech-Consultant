@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>AI Inbox Agent | Email Intelligence Dashboard</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-container">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">✦</div>
+                <div>
+                    <h2>AI Assistant</h2>
+                    <p>Enterprise Intelligence</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active">▦ Dashboard</a>
+                <a href="#emailAssistant" class="nav-item">✉ Email Assistant</a>
+                <a href="#knowledgeSources" class="nav-item">◇ Knowledge Brain</a>
+            </nav>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+
+            <!-- HEADER -->
+            <header class="page-header">
+                <div>
+                    <span class="eyebrow">AI-POWERED CUSTOMER SUPPORT</span>
+                    <h1>Email Intelligence Dashboard</h1>
+                    <p>Analyze customer emails and generate context-aware responses.</p>
+                </div>
+
+                <div class="assistant-badge">
+                    <span class="status-dot"></span>
+                    AI Assistant
+                </div>
+            </header>
+
+            <!-- DASHBOARD STATISTICS -->
+            <section class="stats-grid">
+
+                <article class="stat-card">
+                    <div class="stat-icon purple">✉</div>
+                    <div>
+                        <span>Email Analysis</span>
+                        <h2 id="emailsProcessed">0</h2>
+                        <small>Emails processed this session</small>
+                    </div>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-icon blue">◇</div>
+                    <div>
+                        <span>Knowledge Sources</span>
+                        <h2 id="documentsRetrieved">0</h2>
+                        <small>Documents retrieved</small>
+                    </div>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-icon green">✓</div>
+                    <div>
+                        <span>Draft Status</span>
+                        <h2 id="dashboardStatus">Ready</h2>
+                        <small id="dashboardStatusDetail">
+                            Human approval required
+                        </small>
+                    </div>
+                </article>
+
+            </section>
+
+            <!-- SUCCESS AND ERROR MESSAGES -->
+            <div
+                id="successContainer"
+                class="alert success"
+                role="status"
+                hidden
+            ></div>
+
+            <div
+                id="errorContainer"
+                class="alert error"
+                role="alert"
+                hidden
+            ></div>
+
+            <!-- MAIN WORKSPACE -->
+            <section class="workspace">
+
+                <!-- CUSTOMER EMAIL FORM -->
+                <article
+                    class="panel email-panel"
+                    id="emailAssistant"
+                >
+
+                    <div class="panel-heading">
+                        <div>
+                            <span class="step-label">STEP 01</span>
+                            <h2>Customer Email</h2>
+                            <p>Enter a customer email to analyze.</p>
+                        </div>
+
+                        <div class="panel-icon">✉</div>
+                    </div>
+
+                    <form id="emailForm">
+
+                        <!-- CUSTOMER EMAIL -->
+                        <div class="form-group">
+                            <label for="from">
+                                Customer Email Address
+                            </label>
+
+                            <input
+                                type="email"
+                                id="from"
+                                name="from"
+                                value="customer@example.com"
+                                placeholder="customer@example.com"
+                                required
+                            >
+                        </div>
+
+                        <!-- EMAIL SUBJECT -->
+                        <div class="form-group">
+                            <label for="subject">Subject</label>
+
+                            <input
+                                type="text"
+                                id="subject"
+                                name="subject"
+                                value="My domain is not connecting"
+                                maxlength="300"
+                                placeholder="Enter email subject"
+                                required
+                            >
+                        </div>
+
+                        <!-- EMAIL MESSAGE -->
+                        <div class="form-group">
+                            <label for="body">Email Message</label>
+
+                            <textarea
+                                id="body"
+                                name="body"
+                                rows="5"
+                                maxlength="10000"
+                                placeholder="Enter the customer's message"
+                                required
+                            >I connected my domain to my website, but my website is still not opening. Could you please help me fix it?
+
+Thank you.</textarea>
+
+                            <div class="field-footer">
+                                <small>Customer message</small>
+                                <small id="characterCount">0 / 10000</small>
+                            </div>
+                        </div>
+
+                        <!-- SAMPLE EMAILS -->
+                        <div class="sample-section">
+                            <label>Try a sample email</label>
+
+                            <div class="sample-buttons">
+
+                                <button
+                                    type="button"
+                                    data-sample="billing"
+                                >
+                                    Billing
+                                </button>
+
+                                <button
+                                    type="button"
+                                    data-sample="account"
+                                >
+                                    Account Access
+                                </button>
+
+                                <button
+                                    type="button"
+                                    data-sample="domain"
+                                >
+                                    Domain Support
+                                </button>
+
+                            </div>
+                        </div>
+
+                        <!-- ANALYZE BUTTON -->
+                        <button
+                            type="submit"
+                            id="analyzeButton"
+                            class="primary-button"
+                        >
+                            <span id="analyzeButtonText">
+                                ✦ Analyze Email with AI
+                            </span>
+
+                            <span aria-hidden="true">→</span>
+                        </button>
+
+                    </form>
+
+                </article>
+
+                <!-- AI RESPONSE PANEL -->
+                <article class="panel response-panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <span class="step-label">STEP 02</span>
+                            <h2>AI-Generated Response</h2>
+                            <p>
+                                Review and edit the response before using it.
+                            </p>
+                        </div>
+
+                        <span class="ai-badge">✦ AI GENERATED</span>
+                    </div>
+
+                    <!-- CATEGORY AND REVIEW STATUS -->
+                    <div class="review-summary">
+
+                        <div>
+                            <span>DETECTED CATEGORY</span>
+                            <strong id="categoryOutput">
+                                Not analyzed
+                            </strong>
+                        </div>
+
+                        <div>
+                            <span>REVIEW STATUS</span>
+                            <strong id="reviewStatus">
+                                Waiting
+                            </strong>
+                        </div>
+
+                    </div>
+
+                    <!-- EMPTY STATE -->
+                    <div id="emptyState" class="empty-state">
+
+                        <div class="empty-icon">✧</div>
+
+                        <h3>Your AI response will appear here</h3>
+
+                        <p>
+                            Enter a customer email and select
+                            Analyze Email with AI.
+                        </p>
+
+                    </div>
+
+                    <!-- GENERATED DRAFT -->
+                    <div id="draftSection" hidden>
+
+                        <div class="draft-label-row">
+                            <label for="draftOutput">
+                                Generated Reply
+                            </label>
+
+                            <small id="draftMode">
+                                Edit the draft before review
+                            </small>
+                        </div>
+
+                        <!-- EDITABLE RESPONSE -->
+                        <textarea
+                            id="draftOutput"
+                            class="draft-textarea"
+                            rows="10"
+                            maxlength="15000"
+                            placeholder="Your AI-generated response will appear here..."
+                            aria-label="Editable AI-generated email draft"
+                        ></textarea>
+
+                        <!-- DRAFT ACTION BUTTONS -->
+                        <div class="draft-actions">
+
+                            <!-- COPY -->
+                            <button
+                                type="button"
+                                id="copyButton"
+                                class="action-button copy-button"
+                                disabled
+                            >
+                                Copy Draft
+                            </button>
+
+                            <!-- SAVE EDITED DRAFT -->
+                            <button
+                                type="button"
+                                id="saveDraftButton"
+                                class="btn btn-primary"
+                                disabled
+                            >
+                                Save Edited Draft
+                            </button>
+
+                            <!-- APPROVE -->
+                            <button
+                                type="button"
+                                id="approveButton"
+                                class="action-button approve-button"
+                                disabled
+                            >
+                                ✓ Approve Draft
+                            </button>
+
+                            <!-- REJECT -->
+                            <button
+                                type="button"
+                                id="rejectButton"
+                                class="action-button reject-button"
+                                disabled
+                            >
+                                ✕ Reject Draft
+                            </button>
+
+                        </div>
+
+                        <p class="approval-note">
+                            Approval records your decision. It does not send an email.
+                        </p>
+
+                    </div>
+
+                    <!-- KNOWLEDGE SOURCES -->
+                    <section
+                        class="sources-section"
+                        id="knowledgeSources"
+                    >
+
+                        <div class="sources-heading">
+                            <div>
+                                <h3>Knowledge Sources</h3>
+
+                                <p>
+                                    Information used to help generate the response.
+                                </p>
+                            </div>
+
+                            <span
+                                id="sourceBadge"
+                                class="source-badge"
+                            >
+                                0 SOURCES
+                            </span>
+                        </div>
+
+                        <div id="sourcesList" class="sources-list">
+                            <p class="source-placeholder">
+                                Knowledge sources will appear after analysis.
+                            </p>
+                        </div>
+
+                    </section>
+
+                    <!-- PROVIDER INFORMATION -->
+                    <footer class="provider-footer">
+
+                        <span>
+                            PROVIDER <strong>Groq</strong>
+                        </span>
+
+                        <span class="provider-divider"></span>
+
+                        <span>
+                            MODEL
+                            <strong id="modelOutput">Configured model</strong>
+                        </span>
+
+                    </footer>
+
+                    <!-- BACKEND CONNECTION STATUS -->
+                    <p
+                        id="knowledgeStatus"
+                        class="connection-status"
+                        role="status"
+                    >
+                        Checking backend connection...
+                    </p>
+
+                </article>
+
+            </section>
+
+            <!-- FOOTER -->
+            <footer class="page-footer">
+                AI Inbox Agent · Human review required before email use
+            </footer>
+
+        </main>
+
+    </div>
+
+    <!-- JAVASCRIPT -->
+    <script src="script.js"></script>
+
+</body>
+</html>
