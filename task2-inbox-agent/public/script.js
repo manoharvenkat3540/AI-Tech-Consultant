@@ -1,12 +1,15 @@
 "use strict";
 
-// Frontend and backend use the same origin.
 const API_BASE = "/api/emails";
 
-// DOM helper.
 const $ = (id) => document.getElementById(id);
 
-// HTML elements.
+let currentDraftId = null;
+let currentDraftStatus = null;
+let originalDraft = "";
+let emailsProcessed = 0;
+let cachedEmailHistory = [];
+
 const elements = {
     form: $("emailForm"),
     from: $("from"),
@@ -26,62 +29,74 @@ const elements = {
 
     categoryOutput: $("categoryOutput"),
     reviewStatus: $("reviewStatus"),
-    emptyState: $("emptyState"),
 
+    emptyState: $("emptyState"),
     draftSection: $("draftSection"),
     draftOutput: $("draftOutput"),
-    draftMode: $("draftMode"),
 
     approveButton: $("approveButton"),
     rejectButton: $("rejectButton"),
     copyButton: $("copyButton"),
     saveDraftButton: $("saveDraftButton"),
+    sendEmailButton: $("sendEmailButton"),
 
     modelOutput: $("modelOutput"),
-
     sourceBadge: $("sourceBadge"),
     sourcesList: $("sourcesList"),
-
     knowledgeStatus: $("knowledgeStatus"),
-    characterCount: $("characterCount")
+    characterCount: $("characterCount"),
+    approvalNote: $("approvalNote"),
+
+    historySearch: $("historySearch"),
+    historyTableBody: $("historyTableBody"),
+    historyCount: $("historyCount"),
+    historyMessage: $("historyMessage"),
+    refreshHistoryButton: $("refreshHistoryButton"),
+    historyDetail: $("historyDetail"),
+    closeHistoryDetail: $("closeHistoryDetail")
 };
 
-// Current draft information.
-let currentDraftId = null;
-let currentDraftStatus = null;
-let originalDraft = "";
-let emailsProcessed = 0;
+/* =========================
+   API HELPERS
+========================= */
 
-// Escape HTML before displaying untrusted text.
-function escapeHTML(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (character) => {
-        const replacements = {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-        };
-
-        return replacements[character];
+async function apiRequest(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            Accept: "application/json",
+            ...(options.body ? {
+                "Content-Type": "application/json"
+            } : {}),
+            ...options.headers
+        }
     });
+
+    const text = await response.text();
+
+    let data;
+
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch {
+        throw new Error(`Invalid server response. HTTP ${response.status}`);
+    }
+
+    if (!response.ok) {
+        throw new Error(
+            data.error ||
+            data.message ||
+            `Request failed. HTTP ${response.status}`
+        );
+    }
+
+    return data;
 }
 
-// Display an error message.
-function showError(message) {
-    elements.errorContainer.textContent = message;
-    elements.errorContainer.hidden = false;
-    elements.successContainer.hidden = true;
-}
+/* =========================
+   NOTIFICATIONS
+========================= */
 
-// Display a success message.
-function showSuccess(message) {
-    elements.successContainer.textContent = message;
-    elements.successContainer.hidden = false;
-    elements.errorContainer.hidden = true;
-}
-
-// Clear messages.
 function clearMessages() {
     elements.errorContainer.hidden = true;
     elements.successContainer.hidden = true;
@@ -90,632 +105,473 @@ function clearMessages() {
     elements.successContainer.textContent = "";
 }
 
-// Read and validate API responses.
-async function readResponse(response) {
-    const text = await response.text();
+function showError(message) {
+    console.error(message);
 
-    let data;
-
-    try {
-        data = text ? JSON.parse(text) : {};
-    } catch {
-        throw new Error(
-            `Unexpected server response. HTTP ${response.status}.`
-        );
-    }
-
-    if (!response.ok) {
-        throw new Error(
-            data.message ||
-            data.error ||
-            `Request failed. HTTP ${response.status}.`
-        );
-    }
-
-    return data;
+    elements.errorContainer.textContent = message;
+    elements.errorContainer.hidden = false;
+    elements.successContainer.hidden = true;
 }
 
-// Update the Analyze button and dashboard.
-function setLoading(isLoading) {
-    elements.analyzeButton.disabled = isLoading;
+function showSuccess(message) {
+    elements.successContainer.textContent = message;
+    elements.successContainer.hidden = false;
+    elements.errorContainer.hidden = true;
+}
 
-    elements.analyzeButtonText.textContent = isLoading
-        ? "Generating AI response..."
-        : "Analyze Email with AI";
+function updateDashboardStatus(status, detail) {
+    elements.dashboardStatus.textContent = status;
+    elements.dashboardStatusDetail.textContent = detail || "";
+}
 
-    elements.analyzeButton.setAttribute(
-        "aria-busy",
-        String(isLoading)
+function setSendButton(visible, disabled, text) {
+    elements.sendEmailButton.hidden = !visible;
+    elements.sendEmailButton.disabled = disabled;
+
+    elements.sendEmailButton.textContent =
+        text || "✉ Send Approved Email";
+}
+
+function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    })[char]);
+}
+
+/* =========================
+   CHARACTER COUNTER
+========================= */
+
+function updateCharacterCount() {
+    elements.characterCount.textContent =
+        `${elements.body.value.length} / 10000`;
+}
+
+/* =========================
+   DISPLAY AI RESPONSE
+========================= */
+
+function displayDraft(data) {
+    const record =
+        data.email && typeof data.email === "object"
+            ? data.email
+            : data;
+
+    currentDraftId = data.id || record.id;
+
+    currentDraftStatus =
+        data.status || record.status || "awaiting_human_review";
+
+    originalDraft = data.draft || record.draft || "";
+
+    elements.emptyState.hidden = true;
+    elements.draftSection.hidden = false;
+
+    elements.draftOutput.value = originalDraft;
+
+    elements.categoryOutput.textContent =
+        data.category || record.category || "General Support";
+
+    elements.reviewStatus.textContent =
+        currentDraftStatus.replaceAll("_", " ");
+
+    elements.modelOutput.textContent = "Groq AI";
+
+    const awaitingReview =
+        currentDraftStatus === "awaiting_human_review";
+
+    elements.approveButton.disabled = !awaitingReview;
+    elements.rejectButton.disabled = !awaitingReview;
+    elements.saveDraftButton.disabled = !awaitingReview;
+
+    setSendButton(
+        currentDraftStatus === "approved",
+        currentDraftStatus !== "approved"
     );
 
-    elements.knowledgeStatus.textContent = isLoading
-        ? "Analyzing email..."
-        : currentDraftId
-            ? "Analysis completed"
-            : "Awaiting analysis";
+    updateDashboardStatus(
+        currentDraftStatus.replaceAll("_", " "),
+        "Review the generated reply before sending."
+    );
 
-    elements.dashboardStatus.textContent = isLoading
-        ? "Processing"
-        : currentDraftStatus === "awaiting_human_review"
-            ? "Review"
-            : currentDraftStatus === "approved"
-                ? "Approved"
-                : currentDraftStatus === "rejected"
-                    ? "Rejected"
-                    : "Ready";
+    renderSources(data.knowledgeSources || []);
 }
 
-// Display retrieved knowledge sources.
-function renderSources(sources) {
-    const safeSources = Array.isArray(sources) ? sources : [];
-
-    elements.documentsRetrieved.textContent =
-        String(safeSources.length);
-
-    elements.sourceBadge.textContent =
-        `${safeSources.length} SOURCE${safeSources.length === 1 ? "" : "S"}`;
-
-    if (safeSources.length === 0) {
-        elements.sourcesList.innerHTML = `
-            <div class="no-sources">
-                <div class="source-icon">◇</div>
-                <div>
-                    <strong>No knowledge sources returned</strong>
-                    <p>
-                        No matching knowledge documents were returned
-                        for this email.
-                    </p>
-                </div>
-            </div>
-        `;
-
-        return;
-    }
-
-    elements.sourcesList.innerHTML = safeSources.map((source) => {
-        const title = escapeHTML(
-            source.title || "Untitled document"
-        );
-
-        const category = escapeHTML(
-            source.category || "General"
-        );
-
-        const score = Number(
-            source.relevance_score ?? source.score
-        );
-
-        const scoreText = Number.isFinite(score)
-            ? `Relevance score: ${score}`
-            : "Relevant knowledge document";
-
-        return `
-            <article class="source-card">
-                <div class="source-icon">◇</div>
-                <div>
-                    <strong>${title}</strong>
-                    <p>Category: ${category}</p>
-                    <span class="source-meta">
-                        ${escapeHTML(scoreText)}
-                    </span>
-                </div>
-            </article>
-        `;
-    }).join("");
-}
-
-// Reset the draft area before new analysis.
 function resetDraftView() {
     currentDraftId = null;
     currentDraftStatus = null;
     originalDraft = "";
 
-    elements.draftOutput.value = "";
     elements.draftSection.hidden = true;
     elements.emptyState.hidden = false;
 
-    elements.categoryOutput.textContent = "Analyzing...";
-    elements.reviewStatus.textContent = "Processing";
-    elements.modelOutput.textContent = "Connecting...";
+    elements.categoryOutput.textContent = "Not analyzed";
+    elements.reviewStatus.textContent = "Waiting";
 
-    elements.approveButton.disabled = true;
-    elements.rejectButton.disabled = true;
-    elements.copyButton.disabled = true;
-
-    if (elements.saveDraftButton) {
-        elements.saveDraftButton.disabled = true;
-    }
-
-    renderSources([]);
+    setSendButton(false, true);
 }
 
-// Display the generated draft.
-function displayDraft(data) {
-    if (
-        !data ||
-        typeof data.id !== "string" ||
-        typeof data.draft !== "string" ||
-        !data.draft.trim()
-    ) {
-        throw new Error(
-            "The backend response does not contain a valid draft ID and draft."
-        );
+/* =========================
+   KNOWLEDGE SOURCES
+========================= */
+
+function renderSources(sources) {
+    const list = Array.isArray(sources) ? sources : [];
+
+    elements.documentsRetrieved.textContent = String(list.length);
+
+    elements.sourceBadge.textContent =
+        `${list.length} SOURCE${list.length === 1 ? "" : "S"}`;
+
+    if (!list.length) {
+        elements.knowledgeStatus.textContent =
+            "No knowledge documents were returned by the backend.";
+
+        elements.sourcesList.innerHTML =
+            '<div class="source-empty">No knowledge sources retrieved.</div>';
+
+        return;
     }
 
-    currentDraftId = data.id;
+    elements.knowledgeStatus.textContent =
+        "Knowledge sources returned by the backend.";
 
-    currentDraftStatus =
-        data.status || "awaiting_human_review";
-
-    originalDraft = data.draft;
-
-    elements.emptyState.hidden = true;
-    elements.draftSection.hidden = false;
-
-    elements.draftOutput.value = data.draft;
-
-    elements.categoryOutput.textContent =
-        data.category || "General support";
-
-    elements.reviewStatus.textContent =
-        currentDraftStatus.replaceAll("_", " ");
-
-    elements.modelOutput.textContent =
-        data.ai?.model || "Configured model";
-
-    elements.dashboardStatus.textContent = "Review";
-
-    elements.dashboardStatusDetail.textContent =
-        "Human approval required";
-
-    elements.draftMode.textContent =
-        "Edit the draft before review";
-
-    elements.approveButton.disabled = false;
-    elements.rejectButton.disabled = false;
-    elements.copyButton.disabled = false;
-
-    if (elements.saveDraftButton) {
-        elements.saveDraftButton.disabled = false;
-    }
-
-    renderSources(data.knowledge?.sources || []);
+    elements.sourcesList.innerHTML = list.map(source => `
+        <article class="source-card">
+            <h3>${escapeHTML(source.title || "Knowledge document")}</h3>
+            <p>${escapeHTML(source.category || "Knowledge")}</p>
+        </article>
+    `).join("");
 }
 
-// Analyze an email using the backend.
+/* =========================
+   ANALYZE EMAIL
+========================= */
+
 async function analyzeEmail(event) {
     event.preventDefault();
     clearMessages();
 
-    const email = {
+    const payload = {
         from: elements.from.value.trim(),
         subject: elements.subject.value.trim(),
         body: elements.body.value.trim()
     };
 
-    if (
-        !email.from ||
-        !email.subject ||
-        email.body.length < 3
-    ) {
-        showError(
-            "Please provide an email address, subject, and message."
-        );
-
+    if (!payload.from || !payload.subject || !payload.body) {
+        showError("Please complete all email fields.");
         return;
     }
 
-    if (email.body.length > 10000) {
-        showError(
-            "The email message cannot exceed 10,000 characters."
-        );
+    elements.analyzeButton.disabled = true;
+    elements.analyzeButtonText.textContent = "Analyzing email...";
 
-        return;
-    }
-
-    resetDraftView();
-    setLoading(true);
+    updateDashboardStatus("Analyzing", "Generating your AI reply.");
 
     try {
-        const response = await fetch(
-            `${API_BASE}/draft`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                },
-                body: JSON.stringify(email)
-            }
-        );
-
-        const data = await readResponse(response);
-
-        console.log("Email analysis response:", data);
+        const data = await apiRequest(`${API_BASE}/analyze`, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
 
         displayDraft(data);
 
-        emailsProcessed += 1;
+        emailsProcessed++;
+        elements.emailsProcessed.textContent = String(emailsProcessed);
 
-        elements.emailsProcessed.textContent =
-            String(emailsProcessed);
+        showSuccess(data.message || "AI reply generated successfully.");
 
-        showSuccess(
-            "AI draft generated successfully. Review it before approval."
-        );
-
+        await loadEmailHistory();
     } catch (error) {
-        console.error("Email analysis failed:", error);
+        showError(error.message || "Unable to analyze the email.");
 
-        showError(
-            error instanceof Error
-                ? error.message
-                : "Unable to analyze the email."
-        );
-
-        elements.categoryOutput.textContent = "Analysis failed";
-        elements.reviewStatus.textContent = "Error";
-        elements.dashboardStatus.textContent = "Error";
-
-        elements.dashboardStatusDetail.textContent =
-            "Check the error message";
-
-        elements.knowledgeStatus.textContent =
-            "Analysis failed";
-
+        updateDashboardStatus("Error", "Email analysis failed.");
     } finally {
-        setLoading(false);
+        elements.analyzeButton.disabled = false;
+        elements.analyzeButtonText.textContent = "✦ Analyze Email with AI";
     }
 }
 
-// Save an edited draft using PUT /api/emails/:id.
+/* =========================
+   SAVE EDITED DRAFT
+========================= */
+
 async function saveEditedDraft() {
     clearMessages();
 
     if (!currentDraftId) {
-        showError(
-            "Generate an email draft before saving."
-        );
-
+        showError("Analyze an email before saving.");
         return;
     }
 
-    if (
-        currentDraftStatus !== "awaiting_human_review"
-    ) {
-        showError(
-            "Only drafts awaiting human review can be edited."
-        );
-
+    if (currentDraftStatus !== "awaiting_human_review") {
+        showError("Only drafts awaiting review can be edited.");
         return;
     }
 
-    const editedDraft = elements.draftOutput.value.trim();
+    const draft = elements.draftOutput.value.trim();
 
-    if (!editedDraft) {
-        showError("The reply draft cannot be empty.");
-        return;
-    }
-
-    if (editedDraft.length > 15000) {
-        showError(
-            "The reply draft cannot exceed 15,000 characters."
-        );
-
-        return;
-    }
-
-    if (!elements.saveDraftButton) {
-        showError(
-            'Save button not found. Add id="saveDraftButton" to the HTML button.'
-        );
-
+    if (!draft) {
+        showError("Draft cannot be empty.");
         return;
     }
 
     elements.saveDraftButton.disabled = true;
-
-    const previousButtonText =
-        elements.saveDraftButton.textContent;
-
     elements.saveDraftButton.textContent = "Saving...";
 
     try {
-        const response = await fetch(
-            `${API_BASE}/${encodeURIComponent(currentDraftId)}`,
+        const data = await apiRequest(
+            `${API_BASE}/${encodeURIComponent(currentDraftId)}/draft`,
             {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                },
-                body: JSON.stringify({
-                    draft: editedDraft
-                })
+                body: JSON.stringify({ draft })
             }
         );
 
-        const data = await readResponse(response);
+        originalDraft = data.draft || draft;
 
-        // Update the frontend with the saved draft.
-        originalDraft = data.draft || editedDraft;
+        showSuccess(data.message || "Draft updated successfully.");
 
-        elements.draftOutput.value = originalDraft;
-
-        currentDraftStatus =
-            data.status || currentDraftStatus;
-
-        elements.reviewStatus.textContent =
-            currentDraftStatus.replaceAll("_", " ");
-
-        elements.dashboardStatus.textContent =
-            currentDraftStatus === "awaiting_human_review"
-                ? "Review"
-                : currentDraftStatus;
-
-        elements.dashboardStatusDetail.textContent =
-            "Edited draft saved; awaiting human approval";
-
-        elements.draftMode.textContent =
-            "Edited draft saved";
-
-        elements.knowledgeStatus.textContent =
-            "Draft saved";
-
-        showSuccess(
-            data.message || "Edited draft saved successfully."
-        );
-
+        await loadEmailHistory();
     } catch (error) {
-        console.error("Saving edited draft failed:", error);
-
-        showError(
-            error instanceof Error
-                ? error.message
-                : "Unable to save the edited draft."
-        );
-
+        showError(error.message || "Unable to save draft.");
     } finally {
-        elements.saveDraftButton.disabled = false;
+        elements.saveDraftButton.disabled =
+            currentDraftStatus !== "awaiting_human_review";
 
-        elements.saveDraftButton.textContent =
-            previousButtonText || "Save Edited Draft";
+        elements.saveDraftButton.textContent = "Save Changes";
     }
 }
 
-// Approve the current draft.
-// This records approval; it does not send an email.
+/* =========================
+   APPROVE DRAFT
+========================= */
+
 async function approveDraft() {
     clearMessages();
 
     if (!currentDraftId) {
-        showError(
-            "Generate a draft before approving it."
-        );
-
+        showError("Generate a draft first.");
         return;
     }
 
-    if (
-        currentDraftStatus !== "awaiting_human_review"
-    ) {
-        showError(
-            "This draft has already been reviewed."
-        );
-
+    if (currentDraftStatus !== "awaiting_human_review") {
+        showError("This draft has already been reviewed.");
         return;
     }
 
-    const editedDraft =
-        elements.draftOutput.value.trim();
+    const draft = elements.draftOutput.value.trim();
 
-    if (!editedDraft) {
-        showError(
-            "The reply draft cannot be empty."
-        );
-
-        return;
-    }
-
-    if (editedDraft !== originalDraft) {
-        showError(
-            "You changed the draft. Click Save Edited Draft before approving it."
-        );
-
+    if (!draft) {
+        showError("Draft cannot be empty.");
         return;
     }
 
     elements.approveButton.disabled = true;
-    elements.rejectButton.disabled = true;
 
     try {
-        const response = await fetch(
-            `${API_BASE}/${encodeURIComponent(currentDraftId)}/approve`,
+        if (draft !== originalDraft) {
+            const saved = await apiRequest(
+                `${API_BASE}/${encodeURIComponent(currentDraftId)}/draft`,
+                {
+                    method: "PUT",
+                    body: JSON.stringify({ draft })
+                }
+            );
+
+            originalDraft = saved.draft || draft;
+        }
+
+        const data = await apiRequest(
+            `${API_BASE}/${encodeURIComponent(currentDraftId)}/review`,
             {
                 method: "POST",
-                headers: {
-                    "Accept": "application/json"
-                }
+                body: JSON.stringify({ status: "approved" })
             }
         );
 
-        const data = await readResponse(response);
-
-        currentDraftStatus =
-            data.status || "approved";
+        currentDraftStatus = data.status || "approved";
 
         elements.reviewStatus.textContent =
             currentDraftStatus.replaceAll("_", " ");
 
-        elements.dashboardStatus.textContent =
-            "Approved";
+        elements.approveButton.disabled = true;
+        elements.rejectButton.disabled = true;
+        elements.saveDraftButton.disabled = true;
 
-        elements.dashboardStatusDetail.textContent =
-            "Approval recorded; email not sent";
+        elements.approvalNote.textContent =
+            "Draft approved. You can now send the email.";
 
-        elements.draftMode.textContent =
-            "Approved";
+        setSendButton(true, false);
 
-        elements.knowledgeStatus.textContent =
-            "Draft approved";
+        updateDashboardStatus("Approved", "Ready to send.");
 
-        showSuccess(
-            "Draft approved successfully. No email was sent."
-        );
+        showSuccess(data.message || "Draft approved successfully.");
 
+        await loadEmailHistory();
     } catch (error) {
-        console.error("Approval failed:", error);
-
-        showError(
-            error instanceof Error
-                ? error.message
-                : "Unable to approve the draft."
-        );
-
         elements.approveButton.disabled = false;
-        elements.rejectButton.disabled = false;
+        showError(error.message || "Unable to approve draft.");
     }
 }
 
-// Reject the current draft.
+/* =========================
+   REJECT DRAFT
+========================= */
+
 async function rejectDraft() {
     clearMessages();
 
     if (!currentDraftId) {
-        showError(
-            "Generate a draft before rejecting it."
-        );
-
+        showError("Generate a draft first.");
         return;
     }
 
-    if (
-        currentDraftStatus !== "awaiting_human_review"
-    ) {
-        showError(
-            "This draft has already been reviewed."
-        );
-
+    if (!window.confirm("Are you sure you want to reject this draft?")) {
         return;
     }
 
-    elements.approveButton.disabled = true;
     elements.rejectButton.disabled = true;
 
     try {
-        const response = await fetch(
-            `${API_BASE}/${encodeURIComponent(currentDraftId)}/reject`,
+        const data = await apiRequest(
+            `${API_BASE}/${encodeURIComponent(currentDraftId)}/review`,
             {
                 method: "POST",
-                headers: {
-                    "Accept": "application/json"
-                }
+                body: JSON.stringify({ status: "rejected" })
             }
         );
 
-        const data = await readResponse(response);
-
-        currentDraftStatus =
-            data.status || "rejected";
+        currentDraftStatus = data.status || "rejected";
 
         elements.reviewStatus.textContent =
             currentDraftStatus.replaceAll("_", " ");
 
-        elements.dashboardStatus.textContent =
-            "Rejected";
+        elements.approveButton.disabled = true;
+        elements.saveDraftButton.disabled = true;
 
-        elements.dashboardStatusDetail.textContent =
-            "Draft rejected";
+        setSendButton(false, true);
 
-        elements.draftMode.textContent =
-            "Rejected";
+        updateDashboardStatus("Rejected", "The draft was rejected.");
 
-        elements.knowledgeStatus.textContent =
-            "Draft rejected";
+        showSuccess(data.message || "Draft rejected.");
 
-        showSuccess(
-            "Draft rejected successfully."
-        );
-
+        await loadEmailHistory();
     } catch (error) {
-        console.error("Rejection failed:", error);
-
-        showError(
-            error instanceof Error
-                ? error.message
-                : "Unable to reject the draft."
-        );
-
-        elements.approveButton.disabled = false;
         elements.rejectButton.disabled = false;
+        showError(error.message || "Unable to reject draft.");
     }
 }
 
-// Copy the draft to the clipboard.
-async function copyDraft() {
+/* =========================
+   SEND APPROVED EMAIL
+========================= */
+
+async function sendApprovedEmail() {
     clearMessages();
 
-    const text =
-        elements.draftOutput.value.trim();
+    if (!currentDraftId || currentDraftStatus !== "approved") {
+        showError("Approve the draft before sending.");
+        return;
+    }
 
-    if (!text) {
-        showError(
-            "There is no draft to copy."
+    const confirmed = window.confirm(
+        `Send this approved reply to ${elements.from.value.trim()}?`
+    );
+
+    if (!confirmed) return;
+
+    setSendButton(true, true, "Sending email...");
+
+    try {
+        const data = await apiRequest(
+            `${API_BASE}/${encodeURIComponent(currentDraftId)}/send`,
+            {
+                method: "POST",
+                body: JSON.stringify({})
+            }
         );
 
+        currentDraftStatus = data.status || "sent";
+
+        elements.reviewStatus.textContent =
+            currentDraftStatus.replaceAll("_", " ");
+
+        elements.approvalNote.textContent =
+            "The approved email has been sent successfully.";
+
+        setSendButton(false, true);
+
+        updateDashboardStatus("Sent", "Email sent successfully.");
+
+        showSuccess(data.message || "Email sent successfully.");
+
+        await loadEmailHistory();
+    } catch (error) {
+        setSendButton(true, false);
+
+        showError(error.message || "Unable to send email.");
+    }
+}
+
+/* =========================
+   COPY DRAFT
+========================= */
+
+async function copyDraft() {
+    const text = elements.draftOutput.value;
+
+    if (!text.trim()) {
+        showError("There is no draft to copy.");
         return;
     }
 
     try {
         await navigator.clipboard.writeText(text);
-
-        showSuccess(
-            "Draft copied to clipboard."
-        );
-
-    } catch (error) {
-        console.error(
-            "Clipboard operation failed:",
-            error
-        );
-
-        elements.draftOutput.focus();
+        showSuccess("Draft copied to clipboard.");
+    } catch {
         elements.draftOutput.select();
 
-        showError(
-            "Automatic copying failed. Press Ctrl+C to copy the selected text."
-        );
+        if (document.execCommand("copy")) {
+            showSuccess("Draft copied to clipboard.");
+        } else {
+            showError("Unable to copy the draft.");
+        }
     }
 }
 
-// Sample email data.
-const samples = {
+/* =========================
+   SAMPLE EMAILS
+========================= */
+
+const sampleEmails = {
     billing: {
         from: "customer@example.com",
-        subject: "Question about my invoice",
-        body: "Hello Support Team,\n\nI have a question about the invoice for my account. Could you please explain the billing details and tell me how I can verify the payment?\n\nThank you."
+        subject: "Payment issue with my invoice",
+        body: "I completed my payment, but my account still shows an unpaid invoice. Could you please check this issue?"
     },
 
     account: {
         from: "customer@example.com",
-        subject: "Unable to sign in to my account",
-        body: "Hello Support Team,\n\nI am unable to sign in to my account. I have tried again, but I still cannot access it. Could you please guide me through the account recovery process?\n\nThank you."
+        subject: "Unable to access my account",
+        body: "I am unable to log in to my account. Could you please help me resolve this issue?"
     },
 
     domain: {
         from: "customer@example.com",
         subject: "My domain is not connecting",
-        body: "Hello Support Team,\n\nI connected my domain to my website, but my website is still not opening. Could you please help me identify the problem and explain how to fix it?\n\nThank you."
+        body: "I connected my domain to my website, but my website is still not opening. Could you please help me fix it?"
     }
 };
 
-// Fill the email form with sample data.
-function loadSample(name) {
-    const sample = samples[name];
+function loadSampleEmail(type) {
+    const sample = sampleEmails[type];
 
-    if (!sample) {
-        return;
-    }
+    if (!sample) return;
 
     elements.from.value = sample.from;
     elements.subject.value = sample.subject;
@@ -723,126 +579,212 @@ function loadSample(name) {
 
     updateCharacterCount();
     clearMessages();
+    resetDraftView();
 
-    elements.body.focus();
+    updateDashboardStatus("Ready", "Sample email loaded.");
 }
 
-// Update the email character count.
-function updateCharacterCount() {
-    elements.characterCount.textContent =
-        `${elements.body.value.length} / 10000`;
+/* =========================
+   EMAIL HISTORY
+========================= */
+
+function formatDate(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime())
+        ? String(value)
+        : date.toLocaleString();
 }
 
-// Check the backend connection.
-async function checkBackend() {
+function renderEmailHistory(records) {
+    if (!records.length) {
+        elements.historyTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="history-empty">
+                    No saved emails found.
+                </td>
+            </tr>
+        `;
+
+        elements.historyCount.textContent = "0 emails";
+        return;
+    }
+
+    elements.historyTableBody.innerHTML = records.map(record => {
+        const email = record.email || {};
+
+        return `
+            <tr>
+                <td>${escapeHTML(email.from || "—")}</td>
+                <td>${escapeHTML(email.subject || "—")}</td>
+                <td>${escapeHTML(record.category || "—")}</td>
+                <td>
+                    <span class="history-status">
+                        ${escapeHTML(
+                            String(record.status || "unknown").replaceAll("_", " ")
+                        )}
+                    </span>
+                </td>
+                <td>${escapeHTML(formatDate(record.updatedAt || record.createdAt))}</td>
+                <td>
+                    <button
+                        type="button"
+                        class="history-view-button"
+                        data-history-id="${escapeHTML(record.id)}"
+                    >
+                        View
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join("");
+
+    elements.historyCount.textContent =
+        `${records.length} email${records.length === 1 ? "" : "s"}`;
+}
+
+async function loadEmailHistory() {
+    elements.historyCount.textContent = "Loading...";
+    elements.refreshHistoryButton.disabled = true;
+
     try {
-        const response = await fetch(
-            "/health",
-            {
-                headers: {
-                    "Accept": "application/json"
-                }
-            }
-        );
+        const data = await apiRequest(`${API_BASE}/`);
 
-        const data = await readResponse(response);
+        cachedEmailHistory = Array.isArray(data.emails)
+            ? data.emails
+            : [];
 
-        console.log("Backend connected:", data);
+        const term = elements.historySearch.value.trim().toLowerCase();
 
-        elements.knowledgeStatus.textContent =
-            "Backend connected; awaiting analysis";
+        const filtered = term
+            ? cachedEmailHistory.filter(record => {
+                const email = record.email || {};
 
+                return [
+                    email.from,
+                    email.subject,
+                    email.body,
+                    record.category,
+                    record.draft,
+                    record.status
+                ].some(value =>
+                    String(value || "").toLowerCase().includes(term)
+                );
+            })
+            : cachedEmailHistory;
+
+        renderEmailHistory(filtered);
+        elements.historyMessage.hidden = true;
     } catch (error) {
-        console.error(
-            "Backend health check failed:",
-            error
-        );
+        elements.historyCount.textContent = "Unavailable";
+        elements.historyMessage.textContent = error.message;
+        elements.historyMessage.hidden = false;
 
-        elements.knowledgeStatus.textContent =
-            "Backend connection failed";
-
-        showError(
-            "Cannot connect to the backend. Make sure the Task 2 server is running."
-        );
+        elements.historyTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="history-empty">
+                    Unable to load email history.
+                </td>
+            </tr>
+        `;
+    } finally {
+        elements.refreshHistoryButton.disabled = false;
     }
 }
 
-// Register event listeners.
-function initializeApp() {
-    console.log(
-        "AI Inbox Agent frontend loaded."
-    );
-
-    elements.form.addEventListener(
-        "submit",
-        analyzeEmail
-    );
-
-    elements.approveButton.addEventListener(
-        "click",
-        approveDraft
-    );
-
-    elements.rejectButton.addEventListener(
-        "click",
-        rejectDraft
-    );
-
-    elements.copyButton.addEventListener(
-        "click",
-        copyDraft
-    );
-
-    if (elements.saveDraftButton) {
-        elements.saveDraftButton.addEventListener(
-            "click",
-            saveEditedDraft
+async function showEmailDetails(id) {
+    try {
+        const data = await apiRequest(
+            `${API_BASE}/${encodeURIComponent(id)}`
         );
-    }
 
-    // Sample email buttons.
-    document.querySelectorAll("[data-sample]").forEach(
-        (button) => {
-            button.addEventListener("click", () => {
-                loadSample(button.dataset.sample);
-            });
+        const record = data.email || data;
+        const email = record.email || {};
+
+        $("detailSender").textContent = email.from || "—";
+        $("detailSubject").textContent = email.subject || "—";
+        $("detailCategory").textContent = record.category || "—";
+
+        $("detailStatus").textContent =
+            String(record.status || "unknown").replaceAll("_", " ");
+
+        $("detailCreated").textContent = formatDate(record.createdAt);
+        $("detailUpdated").textContent = formatDate(record.updatedAt);
+
+        $("detailBody").textContent = email.body || "";
+        $("detailDraft").textContent = record.draft || "";
+
+        elements.historyDetail.hidden = false;
+
+        elements.historyDetail.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest"
+        });
+    } catch (error) {
+        elements.historyMessage.textContent = error.message;
+        elements.historyMessage.hidden = false;
+    }
+}
+
+/* =========================
+   INITIALIZE
+========================= */
+
+document.addEventListener("DOMContentLoaded", () => {
+    elements.form.addEventListener("submit", analyzeEmail);
+
+    elements.saveDraftButton.addEventListener("click", saveEditedDraft);
+    elements.approveButton.addEventListener("click", approveDraft);
+    elements.rejectButton.addEventListener("click", rejectDraft);
+    elements.copyButton.addEventListener("click", copyDraft);
+    elements.sendEmailButton.addEventListener("click", sendApprovedEmail);
+
+    elements.body.addEventListener("input", updateCharacterCount);
+
+    document.querySelectorAll("[data-sample]").forEach(button => {
+        button.addEventListener("click", () => {
+            loadSampleEmail(button.dataset.sample);
+        });
+    });
+
+    elements.refreshHistoryButton.addEventListener(
+        "click",
+        loadEmailHistory
+    );
+
+    elements.historySearch.addEventListener("input", loadEmailHistory);
+
+    elements.historyTableBody.addEventListener("click", event => {
+        const button = event.target.closest("[data-history-id]");
+
+        if (button) {
+            showEmailDetails(button.dataset.historyId);
         }
-    );
+    });
 
-    // Email message character counter.
-    elements.body.addEventListener(
-        "input",
-        updateCharacterCount
-    );
-
-    // Notify the user when the draft has unsaved edits.
-    if (
-        elements.draftOutput &&
-        elements.saveDraftButton
-    ) {
-        elements.draftOutput.addEventListener(
-            "input",
-            () => {
-                if (
-                    currentDraftId &&
-                    currentDraftStatus === "awaiting_human_review" &&
-                    elements.draftOutput.value.trim() !== originalDraft
-                ) {
-                    elements.draftMode.textContent =
-                        "Unsaved edits";
-
-                    elements.saveDraftButton.disabled = false;
-                }
-            }
-        );
-    }
+    elements.closeHistoryDetail.addEventListener("click", () => {
+        elements.historyDetail.hidden = true;
+    });
 
     updateCharacterCount();
-    checkBackend();
-}
 
-// Initialize after the page loads.
-document.addEventListener(
-    "DOMContentLoaded",
-    initializeApp
-);
+    fetch("/health")
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Backend health check failed.");
+            }
+
+            return response.json();
+        })
+        .then(data => console.log("Backend connected:", data))
+        .catch(error => console.error(error));
+
+    loadEmailHistory();
+
+    updateDashboardStatus(
+        "Ready",
+        "Human approval is required before sending."
+    );
+});

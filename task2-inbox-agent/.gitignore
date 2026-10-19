@@ -2,3 +2,12 @@ node_modules/
 .env
 .env.*
 !.env.example
+dist/
+coverage/
+
+# Local database
+data/*.db
+
+# Backup files
+*.bak
+*.backup
